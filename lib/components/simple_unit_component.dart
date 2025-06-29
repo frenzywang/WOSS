@@ -15,7 +15,7 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
   double radius = 20.0;
 
   Vector2 velocity = Vector2.zero();
-  final double friction = 0.9;
+  final double friction = 0.98;
 
   // 瞄准状态
   bool isAiming = false;
@@ -413,84 +413,82 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
     super.onCollision(intersectionPoints, other);
 
     if (other is SimpleUnitComponent && other.isPlayer != isPlayer) {
-      print('💥 ${unitData.name} hit ${other.unitData.name}!');
-
-      final damage = (unitData.atk * 0.3).round();
-      other.unitData.takeDamage(damage);
-      print(
-        '${other.unitData.name} took $damage damage, HP: ${other.unitData.hp}/${other.unitData.maxHp}',
-      );
-
-      // 计算碰撞方向
-      final direction = (position - other.position);
-      final distance = direction.length;
-
-      print('🔍 Collision details:');
-      print('  Distance between units: ${distance.toStringAsFixed(1)}');
-      print(
-        '  Unit radii: ${radius} + ${other.radius} = ${radius + other.radius}',
-      );
-
-      if (distance > 0.1) {
-        // 防止除零
-        direction.normalize();
-
-        // 立即强制分离单位
-        final minSeparation = radius + other.radius + 10; // 增加更多间距
-        if (distance < minSeparation) {
-          final separationNeeded = minSeparation - distance;
-          final separation = direction * (separationNeeded * 0.6); // 分离更多
-
-          // 移动两个单位
-          position += separation;
-          other.position -= separation;
-
-          print(
-            '🔧 Units separated by ${separationNeeded.toStringAsFixed(1)} pixels',
-          );
-          print(
-            '  New positions: ${unitData.name} at $position, ${other.unitData.name} at ${other.position}',
-          );
-        }
-
-        // 计算反弹速度
-        final mySpeed = velocity.length;
-        final otherSpeed = other.velocity.length;
-        final combinedSpeed = mySpeed + otherSpeed;
-
-        print('🏀 Bounce calculation:');
+      // 确保物理和伤害计算只由一方发起，防止重复计算
+      if (isPlayer) {
+        // 伤害计算
+        print('💥 ${unitData.name} hit ${other.unitData.name}!');
+        final damage = (unitData.atk * 0.1).round();
+        other.unitData.takeDamage(damage);
         print(
-          '  My speed: ${mySpeed.toStringAsFixed(1)}, Other speed: ${otherSpeed.toStringAsFixed(1)}',
+          '${other.unitData.name} took $damage damage, HP: ${other.unitData.hp}/${other.unitData.maxHp}',
         );
 
-        // 强制反弹 - 确保有足够的分离速度
-        final bounceSpeed = math.max(combinedSpeed * 0.6, 2.0); // 最小反弹速度2.0
+        // --- 物理计算 ---
 
-        other.velocity = direction * bounceSpeed;
-        velocity = direction * -bounceSpeed;
+        // 1. 计算碰撞向量和距离
+        final direction = (position - other.position);
+        final distance = direction.length;
 
-        print(
-          '  New velocities: ${unitData.name}=${velocity.length.toStringAsFixed(1)}, ${other.unitData.name}=${other.velocity.length.toStringAsFixed(1)}',
-        );
+        // 2. 正确的穿透解析 (核心修复)
+        if (distance > 0.1) {
+          final hitboxRadius = radius * 1.5;
+          final otherHitboxRadius = other.radius * 1.5;
+          final penetration = (hitboxRadius + otherHitboxRadius) - distance;
 
-        // 限制最大速度
-        if (other.velocity.length > 5.0) {
-          other.velocity.normalize();
-          other.velocity *= 5.0;
+          if (penetration > 0) {
+            direction.normalize();
+            // 沿碰撞方向将两个单位推开，解决重叠问题
+            final correction = direction * (penetration + 1.0); // 增加缓冲
+            position += correction / 2;
+            other.position -= correction / 2;
+            print(
+              '🔧 Penetration resolved by ${penetration.toStringAsFixed(1)} pixels',
+            );
+          }
+
+          // 3. 基于动量守恒的2D弹性碰撞 (桌球物理)
+          final normal = (position - other.position).normalized();
+          final tangent = Vector2(-normal.y, normal.x);
+
+          // 将速度投影到法线和切线
+          final v1nScalar = velocity.dot(normal);
+          final v1tScalar = velocity.dot(tangent);
+          final v2nScalar = other.velocity.dot(normal);
+
+          // 质量
+          final m1 = unitData.mass;
+          final m2 = other.unitData.mass;
+
+          // 沿法线方向进行一维弹性碰撞计算
+          final v1nFinalScalar =
+              (v1nScalar * (m1 - m2) + 2 * m2 * v2nScalar) / (m1 + m2);
+          final v2nFinalScalar =
+              (v2nScalar * (m2 - m1) + 2 * m1 * v1nScalar) / (m1 + m2);
+
+          // 将标量速度转换回矢量
+          final v1nFinal = normal * v1nFinalScalar;
+          final v1tFinal = tangent * v1tScalar; // 切线速度不变
+          final v2nFinal = normal * v2nFinalScalar;
+          final v2tFinal = tangent * other.velocity.dot(tangent); // 切线速度不变
+
+          // 组合最终速度
+          velocity = v1nFinal + v1tFinal;
+          other.velocity = v2nFinal + v2tFinal;
+
+          print('🏀 Momentum exchange complete!');
+          print(
+            '  New velocities: ${unitData.name}=${velocity.length.toStringAsFixed(1)}, ${other.unitData.name}=${other.velocity.length.toStringAsFixed(1)}',
+          );
+        } else {
+          // 距离太小时，强制分离
+          print('⚠️ Units too close! Force separating...');
+          final randomDirection = Vector2(1, 0); // 默认向右分离
+          position += randomDirection * 30;
+          other.position -= randomDirection * 30;
+
+          velocity = randomDirection * -2.0;
+          other.velocity = randomDirection * 2.0;
         }
-        if (velocity.length > 5.0) {
-          velocity.normalize();
-          velocity *= 5.0;
-        }
-      } else {
-        // 距离太小时，强制分离
-        print('⚠️ Units too close! Force separating...');
-        final randomDirection = Vector2(1, 0); // 默认向右分离
-        position += randomDirection * 30;
-        other.position -= randomDirection * 30;
-
-        velocity = randomDirection * -2.0;
-        other.velocity = randomDirection * 2.0;
       }
 
       return true;
