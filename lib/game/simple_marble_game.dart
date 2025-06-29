@@ -143,8 +143,10 @@ class SimpleMarbleBattleGame extends FlameGame
 
       if (distance < unit.radius + 20) {
         selectedUnit = unit;
-        dragStart = worldPosition;
+        dragStart = selectedUnit!.position.clone(); // 以单位为圆心
         dragCurrent = worldPosition;
+        selectedUnit!.isAiming = true;
+        selectedUnit!.dragEndPosition = worldPosition;
         print('✅ Unit selected: ${unit.unitData.name}');
         return true;
       }
@@ -164,19 +166,15 @@ class SimpleMarbleBattleGame extends FlameGame
     if (selectedUnit == null || dragStart == null) return false;
 
     final screenPos = info.eventPosition.global;
-    // 暂时使用屏幕坐标，稍后修复坐标转换
-    final rawDragCurrent = Vector2(screenPos.x, screenPos.y);
+    dragCurrent = Vector2(screenPos.x, screenPos.y);
 
     // 应用最大拖拽距离限制
-    final direction = dragStart! - rawDragCurrent;
-
+    final direction = dragCurrent! - dragStart!; // 从圆心到手指
     if (direction.length > maxDragDistance) {
-      // 限制拖拽距离
       final limitedDirection = direction.normalized() * maxDragDistance;
-      dragCurrent = dragStart! - limitedDirection;
-    } else {
-      dragCurrent = rawDragCurrent;
+      dragCurrent = dragStart! + limitedDirection; // 限制拖拽位置
     }
+    selectedUnit!.dragEndPosition = dragCurrent;
 
     // 只在距离变化较大时输出调试信息
     return true;
@@ -204,6 +202,10 @@ class SimpleMarbleBattleGame extends FlameGame
   }
 
   void _clearDrag() {
+    if (selectedUnit != null) {
+      selectedUnit!.isAiming = false;
+      selectedUnit!.dragEndPosition = null;
+    }
     selectedUnit = null;
     dragStart = null;
     dragCurrent = null;
@@ -253,210 +255,7 @@ class SimpleMarbleBattleGame extends FlameGame
   void render(Canvas canvas) {
     super.render(canvas);
 
-    if (selectedUnit != null && dragStart != null && dragCurrent != null) {
-      _renderTrajectoryLine(canvas);
-    }
-  }
-
-  void _renderTrajectoryLine(Canvas canvas) {
-    if (dragStart == null || dragCurrent == null || selectedUnit == null)
-      return;
-
-    final direction = dragStart! - dragCurrent!;
-    final distance = direction.length;
-
-    // 调试输出（只在距离变化较大时输出）
-    if (distance % 20 < 2) {
-      // 每20像素输出一次
-      print('🎯 Trajectory Debug:');
-      print('  Unit pos: ${selectedUnit!.position}');
-      print('  Drag start: ${dragStart}');
-      print('  Drag current: ${dragCurrent}');
-      print('  Direction: $direction');
-      print('  Distance: ${distance.toStringAsFixed(1)}');
-    }
-
-    // 设置最大拖拽距离限制
-    final clampedDistance = distance.clamp(0.0, maxDragDistance);
-    final isAtMaxDistance = distance >= maxDragDistance;
-
-    if (clampedDistance > 10) {
-      final unitPos = selectedUnit!.position;
-      final normalizedDirection = direction.normalized();
-
-      // 计算力度百分比 (0.0 到 1.0)
-      final forceRatio = clampedDistance / maxDragDistance;
-
-      // 根据力度调整颜色 - 绿色到红色渐变
-      final color =
-          Color.lerp(Colors.green, Colors.red, forceRatio) ?? Colors.orange;
-
-      // 根据力度调整透明度
-      final alpha = (0.7 + forceRatio * 0.3).clamp(0.7, 1.0);
-      final trajectoryColor = color.withValues(alpha: alpha);
-
-      // 计算指示器起点 - 从圆形边缘开始
-      final unitRadius = selectedUnit!.radius;
-      final lineStartPos = unitPos + normalizedDirection * unitRadius;
-
-      // 计算指示器长度
-      final lineLength = clampedDistance * 1.2;
-
-      if (distance % 20 < 2) {
-        print('  Line start: $lineStartPos');
-        print('  Line length: $lineLength');
-      }
-
-      // 绘制左右两条平行线
-      final perpendicular = Vector2(
-        -normalizedDirection.y,
-        normalizedDirection.x,
-      );
-      final lineOffset = 8.0;
-
-      final leftLineStart = lineStartPos + perpendicular * lineOffset;
-      final leftLineEnd = leftLineStart + normalizedDirection * lineLength;
-      final rightLineStart = lineStartPos - perpendicular * lineOffset;
-      final rightLineEnd = rightLineStart + normalizedDirection * lineLength;
-
-      final linePaint = Paint()
-        ..color = trajectoryColor
-        ..strokeWidth = 2.0
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round;
-
-      // 左边线
-      canvas.drawLine(
-        Offset(leftLineStart.x, leftLineStart.y),
-        Offset(leftLineEnd.x, leftLineEnd.y),
-        linePaint,
-      );
-
-      // 右边线
-      canvas.drawLine(
-        Offset(rightLineStart.x, rightLineStart.y),
-        Offset(rightLineEnd.x, rightLineEnd.y),
-        linePaint,
-      );
-
-      // 在两条线之间绘制箭头装饰
-      final numIndicators = (lineLength / 30).round().clamp(3, 6);
-      for (int i = 1; i <= numIndicators; i++) {
-        final t = i / (numIndicators + 1);
-        final indicatorPos =
-            lineStartPos + normalizedDirection * lineLength * t;
-        _drawIndicatorPattern(
-          canvas,
-          indicatorPos,
-          normalizedDirection,
-          trajectoryColor,
-        );
-      }
-
-      // 绘制力度指示器
-      _drawForceIndicator(canvas, unitPos, forceRatio, isAtMaxDistance);
-    }
-  }
-
-  void _drawIndicatorPattern(
-    Canvas canvas,
-    Vector2 position,
-    Vector2 direction,
-    Color color,
-  ) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 2.0
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    final arrowSize = 5.0;
-    final perpendicular = Vector2(-direction.y, direction.x);
-
-    // ^ 箭头在两条线中间，沿轨迹方向
-    final arrowTip = position + direction * arrowSize;
-    final arrowLeft = position + perpendicular * arrowSize * 0.6;
-    final arrowRight = position - perpendicular * arrowSize * 0.6;
-
-    // 绘制 ^ 的左边
-    canvas.drawLine(
-      Offset(arrowLeft.x, arrowLeft.y),
-      Offset(arrowTip.x, arrowTip.y),
-      paint,
-    );
-
-    // 绘制 ^ 的右边
-    canvas.drawLine(
-      Offset(arrowTip.x, arrowTip.y),
-      Offset(arrowRight.x, arrowRight.y),
-      paint,
-    );
-  }
-
-  void _drawForceIndicator(
-    Canvas canvas,
-    Vector2 unitPos,
-    double forceRatio,
-    bool isAtMax,
-  ) {
-    // 在单位旁边绘制力度条
-    final barWidth = 60.0;
-    final barHeight = 8.0;
-    final barPos = Vector2(unitPos.x - barWidth / 2, unitPos.y - 45);
-
-    // 背景条
-    final bgPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.7)
-      ..style = PaintingStyle.fill;
-
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(barPos.x, barPos.y, barWidth, barHeight),
-        const Radius.circular(4),
-      ),
-      bgPaint,
-    );
-
-    // 力度填充条
-    final fillColor = isAtMax
-        ? Colors.red
-        : Color.lerp(Colors.green, Colors.orange, forceRatio);
-    final fillPaint = Paint()
-      ..color = fillColor ?? Colors.orange
-      ..style = PaintingStyle.fill;
-
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          barPos.x + 2,
-          barPos.y + 2,
-          (barWidth - 4) * forceRatio,
-          barHeight - 4,
-        ),
-        const Radius.circular(2),
-      ),
-      fillPaint,
-    );
-
-    // 最大力度警告
-    if (isAtMax) {
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: 'MAX',
-          style: TextStyle(
-            color: Colors.red,
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      textPainter.layout();
-      textPainter.paint(
-        canvas,
-        Offset(barPos.x + barWidth / 2 - textPainter.width / 2, barPos.y - 20),
-      );
-    }
+    // 所有的绘制逻辑都移动到 SimpleUnitComponent 中了
   }
 
   void nextTurn() {

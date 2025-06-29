@@ -17,6 +17,11 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
   Vector2 velocity = Vector2.zero();
   final double friction = 0.9;
 
+  // 瞄准状态
+  bool isAiming = false;
+  Vector2? dragEndPosition;
+  static const double maxDragDistance = 120.0;
+
   SimpleUnitComponent({
     required this.unitData,
     required this.isPlayer,
@@ -128,6 +133,10 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
   void render(Canvas canvas) {
     // Don't call super.render(canvas) to prevent default CircleComponent rendering
 
+    if (isAiming) {
+      _drawAimingIndicator(canvas);
+    }
+
     Color unitColor;
     switch (unitData.unitClass) {
       case UnitClass.tank:
@@ -222,6 +231,181 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
     }
 
     // Don't call super.render(canvas) - this prevents the white circle
+  }
+
+  void _drawAimingIndicator(Canvas canvas) {
+    if (dragEndPosition == null) return;
+
+    // 瞄准方向是拖拽的反方向 (从单位中心指向拖拽点)
+    final indicatorDirection = position - dragEndPosition!;
+    final distance = indicatorDirection.length;
+
+    // 设置最大拖拽距离限制
+    final clampedDistance = distance.clamp(0.0, maxDragDistance);
+    final isAtMaxDistance = distance >= maxDragDistance;
+
+    if (clampedDistance > 10) {
+      final normalizedDirection = indicatorDirection.normalized();
+
+      // 计算力度百分比 (0.0 到 1.0)
+      final forceRatio = clampedDistance / maxDragDistance;
+
+      // 根据力度调整颜色 - 绿色到红色渐变
+      final color =
+          Color.lerp(Colors.green, Colors.red, forceRatio) ?? Colors.orange;
+
+      // 根据力度调整透明度
+      final alpha = (0.7 + forceRatio * 0.3).clamp(0.7, 1.0);
+      final trajectoryColor = color.withAlpha((alpha * 255).toInt());
+
+      // 计算指示器起点 - 从圆形边缘开始 (本地坐标系中，圆心是0,0)
+      final lineStartPos = normalizedDirection * radius;
+
+      // 计算指示器长度
+      final lineLength = clampedDistance * 1.2;
+
+      // 绘制左右两条平行线
+      final perpendicular = Vector2(
+        -normalizedDirection.y,
+        normalizedDirection.x,
+      );
+      final lineOffset = 12.0;
+
+      final leftLineStart = lineStartPos + perpendicular * lineOffset;
+      final leftLineEnd = leftLineStart + normalizedDirection * lineLength;
+      final rightLineStart = lineStartPos - perpendicular * lineOffset;
+      final rightLineEnd = rightLineStart + normalizedDirection * lineLength;
+
+      final linePaint = Paint()
+        ..color = trajectoryColor
+        ..strokeWidth = 3.0
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round;
+
+      // 左边线
+      canvas.drawLine(
+        leftLineStart.toOffset(),
+        leftLineEnd.toOffset(),
+        linePaint,
+      );
+
+      // 右边线
+      canvas.drawLine(
+        rightLineStart.toOffset(),
+        rightLineEnd.toOffset(),
+        linePaint,
+      );
+
+      // 在两条线之间绘制箭头装饰
+      final numIndicators = (lineLength / 30).round().clamp(3, 6);
+      for (int i = 1; i <= numIndicators; i++) {
+        final t = i / (numIndicators + 1);
+        final indicatorPos =
+            lineStartPos + normalizedDirection * lineLength * t;
+        _drawIndicatorPattern(
+          canvas,
+          indicatorPos,
+          normalizedDirection,
+          trajectoryColor,
+        );
+      }
+
+      // 绘制力度指示器 (单位本地坐标系中，圆心是0,0)
+      _drawForceIndicator(canvas, Vector2.zero(), forceRatio, isAtMaxDistance);
+    }
+  }
+
+  void _drawIndicatorPattern(
+    Canvas canvas,
+    Vector2 position,
+    Vector2 direction,
+    Color color,
+  ) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 3.0
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final arrowSize = 5.0;
+    final perpendicular = Vector2(-direction.y, direction.x);
+
+    // ^ 箭头在两条线中间，沿轨迹方向
+    final arrowTip = position + direction * arrowSize;
+    final arrowLeft = position + perpendicular * arrowSize * 0.6;
+    final arrowRight = position - perpendicular * arrowSize * 0.6;
+
+    // 绘制 ^ 的左边
+    canvas.drawLine(arrowLeft.toOffset(), arrowTip.toOffset(), paint);
+
+    // 绘制 ^ 的右边
+    canvas.drawLine(arrowTip.toOffset(), arrowRight.toOffset(), paint);
+  }
+
+  void _drawForceIndicator(
+    Canvas canvas,
+    Vector2 unitPos,
+    double forceRatio,
+    bool isAtMax,
+  ) {
+    // 在单位旁边绘制力度条 (unitPos is Vector2.zero in local space)
+    final barWidth = 60.0;
+    final barHeight = 8.0;
+    final barPos = Vector2(unitPos.x - barWidth / 2, unitPos.y - radius - 25);
+
+    // 背景条
+    final bgPaint = Paint()
+      ..color = Colors.black.withAlpha(180)
+      ..style = PaintingStyle.fill;
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(barPos.x, barPos.y, barWidth, barHeight),
+        const Radius.circular(4),
+      ),
+      bgPaint,
+    );
+
+    // 力度填充条
+    final fillColor = isAtMax
+        ? Colors.red
+        : Color.lerp(Colors.green, Colors.orange, forceRatio);
+    final fillPaint = Paint()
+      ..color = fillColor ?? Colors.orange
+      ..style = PaintingStyle.fill;
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(
+          barPos.x + 2,
+          barPos.y + 2,
+          (barWidth - 4) * forceRatio,
+          barHeight - 4,
+        ),
+        const Radius.circular(2),
+      ),
+      fillPaint,
+    );
+
+    // 最大力度警告
+    if (isAtMax) {
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: 'MAX',
+          style: TextStyle(
+            color: Colors.red,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      textPainter.paint(
+        canvas,
+        Offset(barPos.x + barWidth / 2 - textPainter.width / 2, barPos.y - 15),
+      );
+    }
   }
 
   @override
