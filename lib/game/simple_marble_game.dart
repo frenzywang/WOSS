@@ -307,7 +307,39 @@ class SimpleMarbleBattleGame extends FlameGame
         print('  Line length: $lineLength');
       }
 
-      // 不绘制主指示线，只绘制 |^| 模式的指示器
+      // 绘制左右两条平行线
+      final perpendicular = Vector2(
+        -normalizedDirection.y,
+        normalizedDirection.x,
+      );
+      final lineOffset = 8.0;
+
+      final leftLineStart = lineStartPos + perpendicular * lineOffset;
+      final leftLineEnd = leftLineStart + normalizedDirection * lineLength;
+      final rightLineStart = lineStartPos - perpendicular * lineOffset;
+      final rightLineEnd = rightLineStart + normalizedDirection * lineLength;
+
+      final linePaint = Paint()
+        ..color = trajectoryColor
+        ..strokeWidth = 2.0
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round;
+
+      // 左边线
+      canvas.drawLine(
+        Offset(leftLineStart.x, leftLineStart.y),
+        Offset(leftLineEnd.x, leftLineEnd.y),
+        linePaint,
+      );
+
+      // 右边线
+      canvas.drawLine(
+        Offset(rightLineStart.x, rightLineStart.y),
+        Offset(rightLineEnd.x, rightLineEnd.y),
+        linePaint,
+      );
+
+      // 在两条线之间绘制箭头装饰
       final numIndicators = (lineLength / 30).round().clamp(3, 6);
       for (int i = 1; i <= numIndicators; i++) {
         final t = i / (numIndicators + 1);
@@ -338,62 +370,25 @@ class SimpleMarbleBattleGame extends FlameGame
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
 
-    final size = 8.0;
+    final arrowSize = 5.0;
     final perpendicular = Vector2(-direction.y, direction.x);
 
-    // 绘制左侧竖线 |
-    final leftLineStart =
-        position + perpendicular * size - direction * size * 0.6;
-    final leftLineEnd =
-        position + perpendicular * size + direction * size * 0.6;
+    // ^ 箭头在两条线中间，沿轨迹方向
+    final arrowTip = position + direction * arrowSize;
+    final arrowLeft = position + perpendicular * arrowSize * 0.6;
+    final arrowRight = position - perpendicular * arrowSize * 0.6;
+
+    // 绘制 ^ 的左边
     canvas.drawLine(
-      Offset(leftLineStart.x, leftLineStart.y),
-      Offset(leftLineEnd.x, leftLineEnd.y),
+      Offset(arrowLeft.x, arrowLeft.y),
+      Offset(arrowTip.x, arrowTip.y),
       paint,
     );
 
-    // 绘制右侧竖线 |
-    final rightLineStart =
-        position - perpendicular * size - direction * size * 0.6;
-    final rightLineEnd =
-        position - perpendicular * size + direction * size * 0.6;
+    // 绘制 ^ 的右边
     canvas.drawLine(
-      Offset(rightLineStart.x, rightLineStart.y),
-      Offset(rightLineEnd.x, rightLineEnd.y),
-      paint,
-    );
-
-    // 连接上下横线，形成框架
-    canvas.drawLine(
-      Offset(leftLineStart.x, leftLineStart.y),
-      Offset(rightLineStart.x, rightLineStart.y),
-      paint,
-    );
-
-    canvas.drawLine(
-      Offset(leftLineEnd.x, leftLineEnd.y),
-      Offset(rightLineEnd.x, rightLineEnd.y),
-      paint,
-    );
-
-    // 绘制中间的 ^ 符号
-    final caretTop = position + direction * size * 0.1;
-    final caretLeft =
-        position - direction * size * 0.1 + perpendicular * size * 0.25;
-    final caretRight =
-        position - direction * size * 0.1 - perpendicular * size * 0.25;
-
-    // ^ 的左边
-    canvas.drawLine(
-      Offset(caretLeft.x, caretLeft.y),
-      Offset(caretTop.x, caretTop.y),
-      paint,
-    );
-
-    // ^ 的右边
-    canvas.drawLine(
-      Offset(caretTop.x, caretTop.y),
-      Offset(caretRight.x, caretRight.y),
+      Offset(arrowTip.x, arrowTip.y),
+      Offset(arrowRight.x, arrowRight.y),
       paint,
     );
   }
