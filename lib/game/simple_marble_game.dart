@@ -1,9 +1,11 @@
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+import 'dart:math';
 import '../models/game_state.dart';
 import '../models/battle_unit.dart';
 import '../components/simple_unit_component.dart';
+import '../components/wall_component.dart';
 
 class SimpleMarbleBattleGame extends FlameGame
     with PanDetector, TapDetector, HasCollisionDetection {
@@ -19,6 +21,9 @@ class SimpleMarbleBattleGame extends FlameGame
   // 游戏常量
   static const double maxDragDistance = 120.0;
 
+  // 简化的边界变量
+  late Rect boundary;
+
   @override
   Future<void> onLoad() async {
     super.onLoad();
@@ -26,6 +31,7 @@ class SimpleMarbleBattleGame extends FlameGame
     print('Game loaded, state: $gameState');
     print('Game size: $size');
 
+    await _setupSimpleBoundary();
     await _setupUnits();
 
     camera.viewfinder.visibleGameSize = size;
@@ -33,13 +39,47 @@ class SimpleMarbleBattleGame extends FlameGame
     print('Game setup complete! Collision detection enabled.');
   }
 
+  Future<void> _setupSimpleBoundary() async {
+    // 创建一个简单的矩形边界，完全移除WallComponent
+    final margin = 60.0;
+    boundary = Rect.fromLTWH(
+      margin,
+      margin,
+      size.x - margin * 2,
+      size.y - margin * 2,
+    );
+
+    print(
+      '📦 Simple boundary created: ${boundary.left}, ${boundary.top}, ${boundary.width}, ${boundary.height}',
+    );
+    print(
+      '📦 边界范围: 左=${boundary.left}, 上=${boundary.top}, 右=${boundary.right}, 下=${boundary.bottom}',
+    );
+
+    // 移除所有之前的墙体组件 - 不再需要
+    children.whereType<WallComponent>().toList().forEach(
+      (wall) => wall.removeFromParent(),
+    );
+
+    // 不再创建WallComponent，直接使用边界检测
+    print('✅ 使用直接边界检测，无虚空墙体');
+  }
+
   Future<void> _setupUnits() async {
     playerUnits.clear();
     enemyUnits.clear();
 
-    print('🎮 Setting up units with game size: $size');
+    print('🎮 Setting up units with boundary: $boundary');
 
-    // Create player units - 放在底部
+    // 确保单位在边界中心区域，远离墙体
+    final centerX = boundary.center.dx;
+    final centerY = boundary.center.dy;
+    final safeMargin = 100.0; // 增大安全边距，从60增到100
+
+    print('边界中心: ($centerX, $centerY)');
+    print('安全边距: $safeMargin');
+
+    // Create player units - 在下方安全区域
     for (int i = 0; i < 2; i++) {
       final unitData = i == 0
           ? BattleUnit(
@@ -50,7 +90,7 @@ class SimpleMarbleBattleGame extends FlameGame
               maxHp: 150,
               atk: 30,
               mass: 10.0,
-              elasticity: 0.1,
+              elasticity: 0.3,
             )
           : BattleUnit(
               id: 'player2',
@@ -60,11 +100,20 @@ class SimpleMarbleBattleGame extends FlameGame
               maxHp: 80,
               atk: 60,
               mass: 5.0,
-              elasticity: 0.6,
+              elasticity: 0.3,
             );
 
-      // 简化位置计算 - 放在底部中央
-      final unitPosition = Vector2(200 + i * 100, size.y - 150);
+      // 确保单位在边界内部的安全区域
+      final unitPosition = Vector2(
+        centerX - 50 + (i * 100), // 更宽的水平间距
+        centerY + 80, // 在中心下方，但不贴近底边
+      );
+
+      // 验证位置是否安全
+      print('玩家单位 $i 位置: $unitPosition');
+      print(
+        '距离边界: 左${unitPosition.x - boundary.left}, 右${boundary.right - unitPosition.x}, 上${unitPosition.y - boundary.top}, 下${boundary.bottom - unitPosition.y}',
+      );
 
       final unit = SimpleUnitComponent(
         unitData: unitData,
@@ -74,10 +123,10 @@ class SimpleMarbleBattleGame extends FlameGame
 
       add(unit);
       playerUnits.add(unit);
-      print('✅ Added player unit: ${unitData.name} at ${unitPosition}');
+      print('✅ Added player unit: ${unitData.name} at $unitPosition');
     }
 
-    // Create enemy units - 放在顶部
+    // Create enemy units - 在上方安全区域
     for (int i = 0; i < 2; i++) {
       final unitData = i == 0
           ? BattleUnit(
@@ -88,7 +137,7 @@ class SimpleMarbleBattleGame extends FlameGame
               maxHp: 100,
               atk: 50,
               mass: 7.0,
-              elasticity: 0.4,
+              elasticity: 0.3,
             )
           : BattleUnit(
               id: 'enemy2',
@@ -98,11 +147,20 @@ class SimpleMarbleBattleGame extends FlameGame
               maxHp: 60,
               atk: 80,
               mass: 3.0,
-              elasticity: 0.9,
+              elasticity: 0.3,
             );
 
-      // 简化位置计算 - 放在顶部中央
-      final unitPosition = Vector2(200 + i * 100, 150);
+      // 确保单位在边界内部的安全区域
+      final unitPosition = Vector2(
+        centerX - 50 + (i * 100), // 更宽的水平间距
+        centerY - 80, // 在中心上方，但不贴近顶边
+      );
+
+      // 验证位置是否安全
+      print('敌方单位 $i 位置: $unitPosition');
+      print(
+        '距离边界: 左${unitPosition.x - boundary.left}, 右${boundary.right - unitPosition.x}, 上${unitPosition.y - boundary.top}, 下${boundary.bottom - unitPosition.y}',
+      );
 
       final unit = SimpleUnitComponent(
         unitData: unitData,
@@ -112,7 +170,7 @@ class SimpleMarbleBattleGame extends FlameGame
 
       add(unit);
       enemyUnits.add(unit);
-      print('✅ Added enemy unit: ${unitData.name} at ${unitPosition}');
+      print('✅ Added enemy unit: ${unitData.name} at $unitPosition');
     }
   }
 
@@ -224,7 +282,7 @@ class SimpleMarbleBattleGame extends FlameGame
     final forceMultiplier = 0.4; // 从0.8减半到0.4
     final force = direction * forceMultiplier; // 保持原始方向和距离比例
 
-    print('📏 Force calculation:');
+    print('�� Force calculation:');
     print('  Drag distance: ${distance.toStringAsFixed(1)}');
     print('  Direction: $direction');
     print('  Final force: $force');
@@ -255,7 +313,13 @@ class SimpleMarbleBattleGame extends FlameGame
   void render(Canvas canvas) {
     super.render(canvas);
 
-    // 所有的绘制逻辑都移动到 SimpleUnitComponent 中了
+    // 直接绘制边框
+    final paint = Paint()
+      ..color = Colors.cyan
+      ..strokeWidth = 4.0
+      ..style = PaintingStyle.stroke;
+
+    canvas.drawRect(boundary, paint);
   }
 
   void nextTurn() {

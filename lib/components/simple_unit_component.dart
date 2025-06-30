@@ -3,6 +3,8 @@ import 'package:flame/collisions.dart';
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import '../models/battle_unit.dart';
+import 'wall_component.dart';
+import '../game/simple_marble_game.dart';
 
 class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
   final BattleUnit unitData;
@@ -11,8 +13,6 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
 
   late TextComponent nameComponent;
   late TextComponent hpComponent;
-  @override
-  double radius = 20.0;
 
   Vector2 velocity = Vector2.zero();
   final double friction = 0.98;
@@ -22,11 +22,16 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
   Vector2? dragEndPosition;
   static const double maxDragDistance = 120.0;
 
+  // 🔧 统一的半径常量，保证所有地方一致
+  static const double unitRadius = 25.0;
+  // 实际碰撞检测半径（与CircleHitbox保持一致）
+  static const double collisionRadius = unitRadius * 1.5; // 37.5
+
   SimpleUnitComponent({
     required this.unitData,
     required this.isPlayer,
     required Vector2 position,
-    double radius = 25,
+    double radius = unitRadius,
   }) : super(
          radius: radius,
          position: position,
@@ -41,11 +46,11 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
   Future<void> onLoad() async {
     super.onLoad();
 
-    // 显著增大碰撞检测区域
-    add(CircleHitbox(radius: radius * 1.5)); // 比视觉半径大50%
+    // 🔧  尝试关闭Flame物理引擎的干扰 - 使用与视觉相同的半径
+    add(CircleHitbox(radius: unitRadius));
 
     print(
-      '🔧 Unit ${unitData.name} loaded at ${position} with hitbox radius: ${radius * 1.5}',
+      '🔧 Unit ${unitData.name} loaded at $position with hitbox radius: ${radius * 1.5}, visual radius: $radius',
     );
 
     nameComponent = TextComponent(
@@ -72,14 +77,13 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
         ),
       ),
       anchor: Anchor.center,
-      position: Vector2(0, radius + 20), // Position below the unit
+      position: Vector2(0, unitRadius + 20), // 使用统一的半径常量
     );
     add(hpComponent);
   }
 
   void launch(Vector2 force) {
     velocity = force;
-    print('Unit ${unitData.name} launched with velocity: $velocity');
   }
 
   @override
@@ -88,44 +92,40 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
 
     hpComponent.text = '${unitData.hp}';
 
+    // 移动逻辑
     if (velocity.length > 0.5) {
+      // 保存移动前的位置
       final oldPosition = position.clone();
-      position += velocity * dt * 80;
-      velocity *= friction;
 
-      final gameSize = findGame()?.size ?? Vector2(800, 600);
+      // 大幅降低速度倍数，防止疯狂弹射
+      position += velocity * dt * 30;
+      velocity *= 0.95;
 
-      if (position.x < radius) {
-        position.x = radius;
-        velocity.x *= -unitData.elasticity;
-        print('${unitData.name} hit left wall');
+      // 🔧 添加边界检测 - 确保角色不会超出边界
+      final clampedPosition = _clampPosition(position);
+
+      // 如果位置被限制，说明撞到了边界，停止相应方向的速度
+      if (clampedPosition.x != position.x) {
+        velocity.x = 0; // 撞到左右边界，停止水平速度
       }
-      if (position.x > gameSize.x - radius) {
-        position.x = gameSize.x - radius;
-        velocity.x *= -unitData.elasticity;
-        print('${unitData.name} hit right wall');
-      }
-      if (position.y < radius) {
-        position.y = radius;
-        velocity.y *= -unitData.elasticity;
-        print('${unitData.name} hit top wall');
-      }
-      if (position.y > gameSize.y - radius) {
-        position.y = gameSize.y - radius;
-        velocity.y *= -unitData.elasticity;
-        print('${unitData.name} hit bottom wall');
+      if (clampedPosition.y != position.y) {
+        velocity.y = 0; // 撞到上下边界，停止垂直速度
       }
 
-      if ((position - oldPosition).length > 0.1) {
-        print(
-          '${unitData.name} moved from $oldPosition to $position, velocity: ${velocity.length.toStringAsFixed(2)}',
-        );
+      position.setFrom(clampedPosition);
+
+      // 停止速度过低的移动
+      if (velocity.length < 5.0) {
+        velocity = Vector2.zero();
       }
     } else {
-      if (velocity.length > 0) {
-        print('${unitData.name} stopped moving');
-      }
       velocity = Vector2.zero();
+    }
+
+    // 无论是否移动，都要进行边界检测
+    final clampedPosition = _clampPosition(position);
+    if (clampedPosition.x != position.x || clampedPosition.y != position.y) {
+      position.setFrom(clampedPosition);
     }
   }
 
@@ -164,7 +164,7 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
     if (isPlayer && !hasBeenUsedThisTurn) {
       final time = DateTime.now().millisecondsSinceEpoch / 1000.0;
       final pulseScale = 1.0 + 0.2 * (0.5 + 0.5 * math.sin(time * 3.0)); // 脉动效果
-      final outerRadius = radius * pulseScale + 8;
+      final outerRadius = unitRadius * pulseScale + 8;
 
       final selectionPaint = Paint()
         ..color = Colors.white.withValues(alpha: 0.6)
@@ -179,7 +179,7 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
       ..color = unitColor
       ..style = PaintingStyle.fill;
 
-    canvas.drawCircle(Offset.zero, radius, paint);
+    canvas.drawCircle(Offset.zero, unitRadius, paint);
 
     // Draw border
     final borderPaint = Paint()
@@ -187,13 +187,13 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
 
-    canvas.drawCircle(Offset.zero, radius, borderPaint);
+    canvas.drawCircle(Offset.zero, unitRadius, borderPaint);
 
     // Health bar below the unit
     final hpRatio = unitData.hp / unitData.maxHp;
-    final hpBarWidth = radius * 1.8;
+    final hpBarWidth = unitRadius * 1.8;
     final hpBarHeight = 6.0;
-    final hpBarY = radius + 5;
+    final hpBarY = unitRadius + 5;
 
     // Health bar background
     final hpBackgroundPaint = Paint()
@@ -259,7 +259,7 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
       final trajectoryColor = color.withAlpha((alpha * 255).toInt());
 
       // 计算指示器起点 - 从圆形边缘开始 (本地坐标系中，圆心是0,0)
-      final lineStartPos = normalizedDirection * radius;
+      final lineStartPos = normalizedDirection * unitRadius;
 
       // 计算指示器长度
       final lineLength = clampedDistance * 1.2;
@@ -351,7 +351,10 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
     // 在单位旁边绘制力度条 (unitPos is Vector2.zero in local space)
     final barWidth = 60.0;
     final barHeight = 8.0;
-    final barPos = Vector2(unitPos.x - barWidth / 2, unitPos.y - radius - 25);
+    final barPos = Vector2(
+      unitPos.x - barWidth / 2,
+      unitPos.y - unitRadius - 25,
+    );
 
     // 背景条
     final bgPaint = Paint()
@@ -408,87 +411,90 @@ class SimpleUnitComponent extends CircleComponent with CollisionCallbacks {
     }
   }
 
+  Vector2 _clampPosition(Vector2 pos) {
+    final game = findGame();
+    if (game is! SimpleMarbleBattleGame) return pos;
+
+    final boundary = (game as SimpleMarbleBattleGame).boundary;
+
+    // 🔧 直接检查单位边缘，而不是圆心
+    final unitLeft = pos.x - unitRadius;
+    final unitRight = pos.x + unitRadius;
+    final unitTop = pos.y - unitRadius;
+    final unitBottom = pos.y + unitRadius;
+
+    // 🔧 直接调整圆心位置，确保边缘不超出
+    var newX = pos.x;
+    var newY = pos.y;
+
+    // 🔧 确保边缘在边界内 + 安全边距（使用半径作为安全边距更合理）
+    final safetyMargin = unitRadius; // 25.0像素，让单位离边界一个半径的距离
+
+    if (unitLeft < boundary.left + safetyMargin) {
+      newX = boundary.left + unitRadius + safetyMargin;
+    }
+    if (unitRight > boundary.right - safetyMargin) {
+      newX = boundary.right - unitRadius - safetyMargin;
+    }
+    if (unitTop < boundary.top + safetyMargin) {
+      newY = boundary.top + unitRadius + safetyMargin;
+    }
+    if (unitBottom > boundary.bottom - safetyMargin) {
+      newY = boundary.bottom - unitRadius - safetyMargin;
+    }
+
+    return Vector2(newX, newY);
+  }
+
   @override
   bool onCollision(Set<Vector2> intersectionPoints, PositionComponent other) {
     super.onCollision(intersectionPoints, other);
 
+    // 只处理单位间碰撞，边界碰撞由update方法处理
     if (other is SimpleUnitComponent && other.isPlayer != isPlayer) {
-      // 确保物理和伤害计算只由一方发起，防止重复计算
+      // 简化单位间碰撞
+      if (unitData.hp <= 0 || other.unitData.hp <= 0) {
+        return false;
+      }
+
       if (isPlayer) {
         // 伤害计算
-        print('💥 ${unitData.name} hit ${other.unitData.name}!');
         final damage = (unitData.atk * 0.1).round();
         other.unitData.takeDamage(damage);
         print(
-          '${other.unitData.name} took $damage damage, HP: ${other.unitData.hp}/${other.unitData.maxHp}',
+          '💥 ${unitData.name} hit ${other.unitData.name} for $damage damage',
         );
 
-        // --- 物理计算 ---
-
-        // 1. 计算碰撞向量和距离
+        // 强化单位分离，防止重叠卡住
         final direction = (position - other.position);
-        final distance = direction.length;
+        if (direction.length > 0.1) {
+          final normalizedDirection = direction.normalized();
+          final separationDistance =
+              unitRadius * 0.5; // Use a smaller, more gentle separation
 
-        // 2. 正确的穿透解析 (核心修复)
-        if (distance > 0.1) {
-          final hitboxRadius = radius * 1.5;
-          final otherHitboxRadius = other.radius * 1.5;
-          final penetration = (hitboxRadius + otherHitboxRadius) - distance;
+          // Calculate potential new positions
+          final newThisPos =
+              position + normalizedDirection * separationDistance;
+          final newOtherPos =
+              other.position - normalizedDirection * separationDistance;
 
-          if (penetration > 0) {
-            direction.normalize();
-            // 沿碰撞方向将两个单位推开，解决重叠问题
-            final correction = direction * (penetration + 1.0); // 增加缓冲
-            position += correction / 2;
-            other.position -= correction / 2;
-            print(
-              '🔧 Penetration resolved by ${penetration.toStringAsFixed(1)} pixels',
-            );
-          }
-
-          // 3. 基于动量守恒的2D弹性碰撞 (桌球物理)
-          final normal = (position - other.position).normalized();
-          final tangent = Vector2(-normal.y, normal.x);
-
-          // 将速度投影到法线和切线
-          final v1nScalar = velocity.dot(normal);
-          final v1tScalar = velocity.dot(tangent);
-          final v2nScalar = other.velocity.dot(normal);
-
-          // 质量
-          final m1 = unitData.mass;
-          final m2 = other.unitData.mass;
-
-          // 沿法线方向进行一维弹性碰撞计算
-          final v1nFinalScalar =
-              (v1nScalar * (m1 - m2) + 2 * m2 * v2nScalar) / (m1 + m2);
-          final v2nFinalScalar =
-              (v2nScalar * (m2 - m1) + 2 * m1 * v1nScalar) / (m1 + m2);
-
-          // 将标量速度转换回矢量
-          final v1nFinal = normal * v1nFinalScalar;
-          final v1tFinal = tangent * v1tScalar; // 切线速度不变
-          final v2nFinal = normal * v2nFinalScalar;
-          final v2tFinal = tangent * other.velocity.dot(tangent); // 切线速度不变
-
-          // 组合最终速度
-          velocity = v1nFinal + v1tFinal;
-          other.velocity = v2nFinal + v2tFinal;
-
-          print('🏀 Momentum exchange complete!');
-          print(
-            '  New velocities: ${unitData.name}=${velocity.length.toStringAsFixed(1)}, ${other.unitData.name}=${other.velocity.length.toStringAsFixed(1)}',
+          // Clamp positions to boundaries BEFORE applying them
+          position.setFrom(_clampPosition(newThisPos));
+          other.position.setFrom(
+            (other as SimpleUnitComponent)._clampPosition(newOtherPos),
           );
-        } else {
-          // 距离太小时，强制分离
-          print('⚠️ Units too close! Force separating...');
-          final randomDirection = Vector2(1, 0); // 默认向右分离
-          position += randomDirection * 30;
-          other.position -= randomDirection * 30;
 
-          velocity = randomDirection * -2.0;
-          other.velocity = randomDirection * 2.0;
+          print(
+            '🔧 单位分离: ${unitData.name} -> $position, ${other.unitData.name} -> ${other.position}',
+          );
         }
+
+        // 简单的速度交换，降低强度
+        final tempVelocity = velocity * 0.3;
+        velocity = other.velocity * 0.3;
+        other.velocity = tempVelocity;
+
+        print('🏀 Simple collision resolved');
       }
 
       return true;
